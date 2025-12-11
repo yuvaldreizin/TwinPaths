@@ -324,7 +324,7 @@ if __name__ == "__main__":
         G,
         dual_path_edges=dual,
         mst_edges=mst_edges,
-        filename_prefix="DPGC",
+        filename_prefix="dpgc",
         results_dir="results"
     )
 

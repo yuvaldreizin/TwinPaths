@@ -1,217 +1,242 @@
+"""
+Animated explanation for both the DPGC heuristic and the Matroid DPT solution.
+
+Improved over the previous demo:
+- Uses a slightly richer 8-node example with realistic weights.
+- Colors dual paths separately (red/blue), MST/recovered edges (green),
+  and non-used edges (light gray).
+- Adds textual legends with s/t terminals and total cost.
+- Provides two separate scenes: DPGC heuristic and Matroid DPT solution.
+
+Render examples (do not run here; Manim not installed in this environment):
+    manim -pqh utils/dpgc_full_animation.py DPGCScene
+    manim -pqh utils/dpgc_full_animation.py MatroidDPTScene
+"""
+
 from manim import *
 import networkx as nx
 
 
-###############################################################################
-# Helper functions
-###############################################################################
+# -----------------------------------------------------------------------------
+# Shared helpers and data
+# -----------------------------------------------------------------------------
 
-def layout_positions(G):
-    """Use spring layout for reproducible node positions."""
-    pos = nx.spring_layout(G, seed=42)
-    return {k: np.array([v[0]*6, v[1]*4, 0]) for k, v in pos.items()}
+def layout_positions(G: nx.Graph):
+    """Use spring layout for reproducible node positions, scaled for Manim."""
+    pos = nx.spring_layout(G, seed=7)
+    return {k: np.array([v[0] * 6, v[1] * 4, 0]) for k, v in pos.items()}
 
 
-def manim_edge(u, v, positions, color=GRAY, weight=None):
+def manim_edge(u, v, positions, color=GRAY, weight=None, width=4):
     """Create a Manim line + weight text for edge (u,v)."""
-    line = Line(positions[u], positions[v], color=color, stroke_width=4)
+    line = Line(positions[u], positions[v], color=color, stroke_width=width)
     if weight is not None:
         mid = (positions[u] + positions[v]) / 2
-        label = Text(str(weight), font_size=20).move_to(mid + DOWN*0.2)
+        label = Text(str(weight), font_size=20).move_to(mid + DOWN * 0.2)
     else:
         label = VGroup()
     return line, label
 
 
-###############################################################################
-# MAIN SCENE
-###############################################################################
+def build_example_graph():
+    """
+    Example graph (s=1, t=3):
+      - Two edge-disjoint s-t paths:
+          P1: 1-2-3 (red)
+          P2: 1-4-5-3 (blue)
+      - Extra nodes (6,7,8) connect via 5-8, 8-7, 7-6 (for MST completion)
+    """
+    edges = [
+        (1, 2, 1),
+        (2, 3, 1),
+        (1, 4, 2),
+        (4, 5, 2),
+        (5, 3, 2),
+        (2, 6, 2),
+        (6, 7, 1),
+        (7, 3, 3),
+        (5, 8, 1),
+        (8, 7, 1),
+        (4, 6, 3),
+    ]
+    G = nx.Graph()
+    for u, v, w in edges:
+        G.add_edge(u, v, weight=w)
+    return G
 
-class DPGCFullScene(Scene):
+
+def legend_box(lines: list[str], position=UR):
+    box = VGroup(*[Text(line, font_size=20) for line in lines]).arrange(DOWN, aligned_edge=LEFT)
+    rect = SurroundingRectangle(box, color=WHITE, buff=0.3)
+    legend = VGroup(rect, box).to_corner(position)
+    return legend
+
+
+# -----------------------------------------------------------------------------
+# DPGC Scene
+# -----------------------------------------------------------------------------
+
+class DPGCScene(Scene):
     def construct(self):
+        G = build_example_graph()
+        pos = layout_positions(G)
+        s, t = 1, 3
 
-        #######################################################################
-        # STEP 0 — Build the original graph
-        #######################################################################
-        G = nx.Graph()
-        edges = [
-            (1, 2, 1),
-            (1, 3, 2),
-            (2, 3, 1),
-            (2, 4, 3),
-            (3, 4, 1),
-            (3, 5, 2),
-            (4, 5, 1),
-        ]
-        for u, v, w in edges:
-            G.add_edge(u, v, weight=w)
-
-        positions = layout_positions(G)
+        # Known dual paths and recovered MST edges for this small example
+        dual_path1 = [(1, 2), (2, 3)]
+        dual_path2 = [(1, 4), (4, 5), (5, 3)]
+        recovered_edges = [(5, 8), (8, 7), (7, 6)]  # from metric-closure MST
 
         # Draw nodes
-        node_mobs = {}
-        for n, pos in positions.items():
-            circ = Circle(radius=0.25, color=WHITE).move_to(pos)
-            label = Text(str(n), font_size=26).move_to(pos)
-            node_mobs[n] = VGroup(circ, label)
-            self.play(FadeIn(circ), FadeIn(label), run_time=0.2)
-
-        self.wait(0.4)
+        nodes = VGroup()
+        for n, p in pos.items():
+            color = GREEN if n in (s, t) else WHITE
+            circ = Circle(radius=0.25, color=color).move_to(p)
+            label = Text(str(n), font_size=26).move_to(p)
+            nodes.add(circ, label)
+        self.play(FadeIn(nodes))
+        self.wait(0.3)
 
         # Draw all edges
-        all_edge_objs = []
-        for u, v, w in edges:
-            line, weight_label = manim_edge(u, v, positions, color=GRAY, weight=w)
-            all_edge_objs.append((u, v, line, weight_label))
-            self.play(Create(line), FadeIn(weight_label), run_time=0.15)
-
-        self.wait(0.8)
+        edge_mobs = []
+        for u, v, w in G.edges.data("weight"):
+            line, wlabel = manim_edge(u, v, pos, color=LIGHT_GRAY, weight=w)
+            edge_mobs.append((u, v, line, wlabel))
+            self.play(Create(line), FadeIn(wlabel), run_time=0.1)
+        self.wait(0.4)
 
         title = Text("DPGC Heuristic", font_size=40).to_edge(UP)
         self.play(FadeIn(title))
+        subtitle = Text("Step 1: Two min-cost edge-disjoint s–t paths", font_size=28).to_edge(DOWN)
+        self.play(FadeIn(subtitle))
 
-
-        #######################################################################
-        # STEP 1 — Dual paths (already known)
-        #######################################################################
-        # For this demonstration, insert known dual paths (from your algorithm output)
-        path1 = [(1, 3), (3, 5)]
-        path2 = [(1, 2), (2, 4), (4, 5)]
-
-        step1_title = Text("Step 1: Find Min-Cost Edge-Disjoint Paths", font_size=32).to_edge(DOWN)
-        self.play(FadeIn(step1_title))
+        # Highlight path1 (red) and path2 (blue)
+        for u, v in dual_path1:
+            for (a, b, line, _) in edge_mobs:
+                if {a, b} == {u, v}:
+                    self.play(line.animate.set_color(RED).set_stroke(width=6), run_time=0.2)
+        for u, v in dual_path2:
+            for (a, b, line, _) in edge_mobs:
+                if {a, b} == {u, v}:
+                    self.play(line.animate.set_color(BLUE).set_stroke(width=6), run_time=0.2)
         self.wait(0.6)
 
-        # Highlight path 1 in RED
-        for u, v in path1:
-            for (a, b, line, lbl) in all_edge_objs:
-                if {a,b} == {u,v}:
-                    self.play(line.animate.set_color(RED), run_time=0.4)
-
-        self.wait(0.5)
-
-        # Highlight path 2 in BLUE
-        for u, v in path2:
-            for (a, b, line, lbl) in all_edge_objs:
-                if {a,b} == {u,v}:
-                    self.play(line.animate.set_color(BLUE), run_time=0.4)
-
-        self.wait(0.8)
-
-
-        #######################################################################
-        # STEP 2 — Contract dual-path nodes into C
-        #######################################################################
+        # Contract step (conceptual)
+        step2 = Text("Step 2: Contract dual-path nodes into C", font_size=28).to_edge(DOWN)
+        self.play(ReplacementTransform(subtitle, step2))
         N1 = {1, 2, 3, 4, 5}
-
-        step2_title = Text("Step 2: Contract Subgraph into Node C", font_size=32).to_edge(DOWN)
-        self.play(ReplacementTransform(step1_title, step2_title))
-        self.wait(0.5)
-
-        # Fade out nodes in N1 except use C instead
-        group_nodes = VGroup(*[node_mobs[n] for n in N1])
-        self.play(FadeOut(group_nodes))
-
-        C_pos = np.array([0, 0, 0])   # center
-        C_node = VGroup(
-            Circle(radius=0.35, color=YELLOW),
-            Text("C", font_size=26)
-        ).move_to(C_pos)
-
+        C_pos = ORIGIN
+        C_node = VGroup(Circle(radius=0.35, color=YELLOW), Text("C", font_size=26)).move_to(C_pos)
+        # Fade out N1 nodes, replace with C
+        self.play(*[FadeOut(nodes[i * 2 : i * 2 + 2]) for i, n in enumerate(G.nodes()) if n in N1], run_time=0.6)
         self.play(FadeIn(C_node))
+        self.wait(0.4)
+
+        # Metric closure + MST (shown abstractly)
+        step3 = Text("Step 3: Metric closure + MST", font_size=28).to_edge(DOWN)
+        self.play(ReplacementTransform(step2, step3))
+        self.wait(0.4)
+
+        # Bring original nodes back and highlight recovered edges
+        self.play(FadeOut(C_node), run_time=0.4)
+        self.play(FadeIn(nodes), run_time=0.6)
+        step4 = Text("Step 4: Recover MST edges into original graph", font_size=28).to_edge(DOWN)
+        self.play(ReplacementTransform(step3, step4))
+        for u, v in recovered_edges:
+            for (a, b, line, _) in edge_mobs:
+                if {a, b} == {u, v}:
+                    self.play(line.animate.set_color(GREEN).set_stroke(width=5), run_time=0.2)
         self.wait(0.5)
 
+        # Final solution: union of dual paths + recovered edges
+        final = Text("Final DPGC solution", font_size=32).to_edge(DOWN)
+        self.play(ReplacementTransform(step4, final))
+        self.wait(0.3)
 
-        #######################################################################
-        # STEP 3 — Build Metric Closure (complete graph)
-        #######################################################################
-        step3_title = Text("Step 3: Metric Closure (Complete Graph)", font_size=32).to_edge(DOWN)
-        self.play(ReplacementTransform(step2_title, step3_title))
-        self.wait(0.5)
+        total_cost = sum(G[u][v]["weight"] for (u, v, line, _) in edge_mobs if line.get_color() != LIGHT_GRAY)
+        legend = legend_box(
+            [
+                "Red: Path 1 (s–t)",
+                "Blue: Path 2 (s–t)",
+                "Green: MST / completion edges",
+                "Gray: Unused edges",
+                f"Terminals: {s}, {t} (green nodes)",
+                f"Total cost (colored edges): {total_cost}",
+            ],
+            position=UR,
+        )
+        self.play(FadeIn(legend))
+        self.wait(2)
 
-        # Compute metric closure
-        H = nx.Graph()
-        H.add_node("C")
-        for n in [6,7,8,9]:  # In real case, these come from your contracted graph
-            H.add_node(n)
 
-        # For demonstration, we connect everything (complete graph)
-        H_edges = []
-        nodes_H = list(H.nodes())
-        for i in range(len(nodes_H)):
-            for j in range(i+1, len(nodes_H)):
-                H_edges.append((nodes_H[i], nodes_H[j], 1+abs(i-j)))
+# -----------------------------------------------------------------------------
+# Matroid DPT Scene
+# -----------------------------------------------------------------------------
 
-        # Place them in circle
-        pos_H = {}
-        R = 3
-        for i, n in enumerate(nodes_H):
-            angle = 2 * PI * i / len(nodes_H)
-            pos_H[n] = np.array([R*np.cos(angle), R*np.sin(angle), 0])
+class MatroidDPTScene(Scene):
+    def construct(self):
+        G = build_example_graph()
+        pos = layout_positions(G)
+        s, t = 1, 3
 
-        # Draw edges
-        H_edge_mobs = []
-        for u,v,w in H_edges:
-            line, wlabel = manim_edge(u, v, pos_H, color=GRAY, weight=w)
-            H_edge_mobs.append((u,v,line,wlabel))
+        # Matroid solution: same final edge set as heuristic in this example
+        path1 = [(1, 2), (2, 3)]
+        path2 = [(1, 4), (4, 5), (5, 3)]
+        tree_edges = [(5, 8), (8, 7), (7, 6)]  # completion edges
 
         # Draw nodes
-        H_nodes_mobs = {}
-        for n,pos in pos_H.items():
-            circ = Circle(radius=0.28, color=WHITE).move_to(pos)
-            label = Text(str(n), font_size=24).move_to(pos)
-            H_nodes_mobs[n] = VGroup(circ,label)
-            self.play(FadeIn(circ), FadeIn(label), run_time=0.2)
+        nodes = VGroup()
+        for n, p in pos.items():
+            color = GREEN if n in (s, t) else WHITE
+            circ = Circle(radius=0.25, color=color).move_to(p)
+            label = Text(str(n), font_size=26).move_to(p)
+            nodes.add(circ, label)
+        self.play(FadeIn(nodes))
+        self.wait(0.3)
 
-        for (_,_,line,wlabel) in H_edge_mobs:
-            self.play(Create(line), FadeIn(wlabel), run_time=0.05)
+        # Draw all edges
+        edge_mobs = []
+        for u, v, w in G.edges.data("weight"):
+            line, wlabel = manim_edge(u, v, pos, color=LIGHT_GRAY, weight=w)
+            edge_mobs.append((u, v, line, wlabel))
+            self.play(Create(line), FadeIn(wlabel), run_time=0.1)
+        self.wait(0.4)
 
-        self.wait(1)
+        title = Text("Matroid DPT (triangle-cost case)", font_size=38).to_edge(UP)
+        self.play(FadeIn(title))
+        subtitle = Text("Intersection of two q-restricted 1-tree matroids", font_size=26).next_to(title, DOWN)
+        self.play(FadeIn(subtitle))
+        self.wait(0.5)
 
+        # Highlight path1 (red) and path2 (blue)
+        for u, v in path1:
+            for (a, b, line, _) in edge_mobs:
+                if {a, b} == {u, v}:
+                    self.play(line.animate.set_color(RED).set_stroke(width=6), run_time=0.2)
+        for u, v in path2:
+            for (a, b, line, _) in edge_mobs:
+                if {a, b} == {u, v}:
+                    self.play(line.animate.set_color(BLUE).set_stroke(width=6), run_time=0.2)
 
-        #######################################################################
-        # STEP 4 — MST on Metric Closure
-        #######################################################################
-        step4_title = Text("Step 4: Minimum Spanning Tree of Metric Closure", font_size=32).to_edge(DOWN)
-        self.play(ReplacementTransform(step3_title, step4_title))
+        # Highlight remaining tree edges (gray->green)
+        for u, v in tree_edges:
+            for (a, b, line, _) in edge_mobs:
+                if {a, b} == {u, v}:
+                    self.play(line.animate.set_color(GREEN).set_stroke(width=5), run_time=0.2)
+        self.wait(0.6)
 
-        # Fake MST for visualization
-        mst_edges = [(nodes_H[i], nodes_H[i+1]) for i in range(len(nodes_H)-1)]
-
-        for u,v in mst_edges:
-            for (a,b,line,wlabel) in H_edge_mobs:
-                if {a,b} == {u,v}:
-                    self.play(line.animate.set_color(GREEN), run_time=0.4)
-
-        self.wait(1)
-
-
-        #######################################################################
-        # STEP 5 — Expand MST edges back to original graph edges
-        #######################################################################
-        step5_title = Text("Step 5: Recover Original Edges", font_size=32).to_edge(DOWN)
-        self.play(ReplacementTransform(step4_title, step5_title))
-
-        # Fade out metric closure
-        self.play(*[FadeOut(m) for m in H_nodes_mobs.values()])
-        for (_,_,line,w) in H_edge_mobs:
-            self.play(FadeOut(line), FadeOut(w), run_time=0.01)
-
-        # Bring back original graph nodes
-        for n, mob in node_mobs.items():
-            self.play(FadeIn(mob), run_time=0.1)
-
-        # Show final result edges (for demo, MST edges = highlight all edges)
-        for (u,v,line,w) in all_edge_objs:
-            self.play(line.animate.set_color(GREEN), run_time=0.1)
-
-        self.wait(1)
-
-
-        #######################################################################
-        # END — Final Solution
-        #######################################################################
-        final_title = Text("Final DPGC Solution", font_size=40).to_edge(UP)
-        self.play(ReplacementTransform(title, final_title))
+        total_cost = sum(G[u][v]["weight"] for (u, v, line, _) in edge_mobs if line.get_color() != LIGHT_GRAY)
+        legend = legend_box(
+            [
+                "Red: Path 1 (matroid basis through s)",
+                "Blue: Path 2 (matroid basis through t)",
+                "Green: Remaining tree edges",
+                f"Terminals: {s}, {t} (green nodes)",
+                f"Total cost (colored edges): {total_cost}",
+                "Computed via weighted matroid intersection",
+            ],
+            position=UR,
+        )
+        self.play(FadeIn(legend))
         self.wait(2)
 

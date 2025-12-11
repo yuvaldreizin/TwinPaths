@@ -1,0 +1,10 @@
+# Core algorithms and graph utilities
+networkx>=3.0
+
+# Plotting and visualization
+matplotlib>=3.7
+pyvis>=0.3.2
+
+# Optional: only needed for Manim animations (`utils/dpgc_full_animation.py`)
+# manim>=0.18
+
