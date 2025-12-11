@@ -23,8 +23,6 @@ python DPGC_heuristic.py
 A helper script creates/uses `.venv`, installs dependencies, and keeps output concise:
 ```powershell
 .\scripts\setup_venv.ps1
-# or dot-source to keep the env activated in your shell:
-. .\scripts\setup_venv.ps1
 ```
 
 ## Key components
@@ -33,8 +31,7 @@ A helper script creates/uses `.venv`, installs dependencies, and keeps output co
   - API: `solve_dpt_matroid(G, s=1, t=2, enforce_metric_closure=False, check_metric=False)`.
   - `check_metric=True` will verify triangle inequality; `enforce_metric_closure=True` will replace weights by shortest-path distances before solving (off by default).
 - `utils/visualize.py`, `utils/visualize_pyvis.py`: Static and interactive graph visualizations; PyVis export writes HTML snapshots.
-- `utils/dpgc_full_animation.py`: Manim scene that animates the DPGC stages (optional dependency).
-- `graphs.py`, `test_graphs_txt_files/`, `example_graphs/`: Parsers and sample topologies (telecom benchmarks).
+
 
 ## Matroid DPT usage (triangle-cost case)
 ```python
@@ -53,4 +50,3 @@ print("Edges in optimal DPT:", solution)
 ## Notes
 - Triangle inequality: inputs are assumed metric; use `check_metric=True` to assert, or `enforce_metric_closure=True` to metricize before solving.
 - Visuals: set `visualize_dual_paths` / `visualize_final` in `dpgc_heuristic` or use the PyVis exporter for interactive HTML.
-- External C++ references under `external/` are kept for comparison; current solver is pure Python.
