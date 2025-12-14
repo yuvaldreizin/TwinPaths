@@ -148,6 +148,7 @@ def mst_k2_generator(graph, start_node, end_node):
         mst[k][1] = list(graph.nodes())[mst[k][1]]
 
     print("graph saved as:", filepath)
+    print(f"minimum spanning tree connections are [node1, node2 , weight of edge]:\n {mst} \nwith total weight of: {final_weights}\n")
     return mst, final_weights
 
 
@@ -214,7 +215,6 @@ if __name__ == "__main__":
 
     # finding the k=2 shortest path by checking every possible combination
     mst, total_weight = mst_k2_generator(graph, 1, 14)
-    print(f"minimum spanning tree connections are [node1, node2 , weight of edge]:\n {mst} \nwith total weight of: {total_weight}\n")   
-
+    
     
         
