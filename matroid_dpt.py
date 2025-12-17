@@ -547,36 +547,44 @@ def solve_dpt_matroid(
 if __name__ == "__main__":
     # General example to exercise the matroid DPT solver.
     # This mirrors the example used in DPGC_heuristic.__main__.
+    graph = nx.Graph()
     edges = [
-        (1, 2, 1),
-        (2, 3, 2),
-        (3, 14, 3),
-        (1, 4, 2),
-        (4, 5, 2),
-        (5, 14, 2),
-        (1, 6, 1),
-        (6, 7, 1),
-        (7, 14, 4),
-        (3, 8, 2),
-        (8, 9, 2),
-        (9, 14, 2),
-        (8, 5, 3),
-        (1, 10, 5),
-        (10, 11, 8),
-        (11, 12, 8),
-        (12, 13, 3),
-        (13, 14, 6),
-        (2, 8, 3),
-        (6, 9, 2),
-        (7, 5, 5),
-    ]
+            # Core block around s=1 and t=14
+            (1, 2, 1),
+            (2, 3, 2),
+            (3, 14, 3),
+            (1, 4, 2),
+            (4, 5, 2),
+            (5, 14, 2),
 
-    G = nx.Graph()
+            # Extra alternate cheap path
+            (1, 6, 1),
+            (6, 7, 1),
+            (7, 14, 4),
+
+            # A diamond cycle in the middle
+            (3, 8, 2),
+            (8, 9, 2),
+            (9, 14, 2),
+            (8, 5, 3),
+
+            # A long misleading "tempting" but expensive path
+            (1, 10, 5),
+            (10, 11, 8),
+            (11, 12, 8),
+            (12, 13, 3),
+            (13, 14, 6),
+
+            # Short cross-links to create competing MST choices
+            (2, 8, 3),
+            (6, 9, 2),
+            (7, 5, 5),
+    ]
     for u, v, w in edges:
-        G.add_edge(u, v, weight=w)
+            graph.add_edge(u, v, weight=w)
 
     solution, info = solve_dpt_matroid(
-        G,
+        graph,
         s=1,
         t=14,
         check_metric=True,
@@ -585,7 +593,7 @@ if __name__ == "__main__":
         visualize_html=True,
     )
 
-    total_cost = sum(G[u][v]["weight"] for u, v in solution)
+    total_cost = sum(graph[u][v]["weight"] for u, v in solution)
     print("Matroid DPT solution edges ({}):".format(len(solution)))
     print(sorted(solution))
     print("Total cost:", total_cost)

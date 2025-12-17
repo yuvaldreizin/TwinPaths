@@ -1,10 +1,23 @@
 import os
 import networkx as nx
-import matplotlib.pyplot as plt
-import pickle
 import numpy as np
 from utils.visualize_pyvis import visualize_dpgc_pyvis
 from utils.visualize import visualize_graph
+import time
+
+"""
+This module contains functions to find the minimum spanning tree (MST) connecting two nodes in a graph using two edge-disjoint paths and additional connections.
+to use this module, call the mst_k2_generator function with a networkx graph and the start and end nodes. example: using file dfn-gwin.pkl, start node 1, end node 5
+
+file = "dfn-gwin.pkl"
+start_node = 1 
+end_node = 5
+with open(file, 'rb') as f:
+    graph = pickle.load(f)
+    mst, total_weight = mst_k2_generator(graph, start_node, end_node)
+
+will return the mst connections, the total weight of the mst and the calculation time.
+"""
 
 def are_paths_independant(path1, path2, start_node, end_node):
     included_nodes = [start_node, end_node]
@@ -36,6 +49,8 @@ def find_paths_aux(graph, current, end, visited, steps, all_paths):
             visited.remove(nxt)
 
 def mst_k2_generator(graph, start_node, end_node):
+    filepath = None
+    time_start = time.time()
     arr = nx.to_numpy_array(graph, weight = 'weight')
     # make sure index order does not matter
     if start_node > end_node:
@@ -147,10 +162,15 @@ def mst_k2_generator(graph, start_node, end_node):
         mst[k][0] = list(graph.nodes())[mst[k][0]]
         mst[k][1] = list(graph.nodes())[mst[k][1]]
 
-    print("graph saved as:", filepath)
-    print(f"minimum spanning tree connections are [node1, node2 , weight of edge]:\n {mst} \nwith total weight of: {final_weights}\n")
-    return mst, final_weights
-
+    if filepath is not None:
+        print("graph saved as:", filepath)
+        print(f"minimum spanning tree connections are [node1, node2 , weight of edge]:\n {mst} \nwith total weight of: {final_weights}")
+        time_end = time.time()
+        print(f"calculation time: {time_end - time_start} seconds")
+        return mst, final_weights
+    else:
+        print("no mst found")
+        return [], 0.0
 
 
 filename = "dfn-gwin.pkl"
@@ -165,18 +185,11 @@ graph = nx.Graph()
 the minimum spanning tree connections are: ( for dfn-gwin.pkl, start node 1, end node 5)
  [[1, 2, 1.211615411300131], [2, 9, 2.4721839546441577], [9, 5, 1.671324127750211], [1, 8, 3.6426894736718913], [8, 5, 0.7185236689907966], [3, 9, 1.423060747684364], [6, 3, 2.1019236409774735], [4, 6, 1.459189268052645], [0, 6, 2.223989285046129], [7, 0, 1.4440425374621095], [10, 2, 2.7947887151804505]]
 
-
-with open(file, 'rb') as f:
-    graph = pickle.load(f)
-    arr = nx.to_numpy_array(graph, weight = 'weight')
-    for i in range(np.size(arr, 0)):
-        print("|", end="")
-        for j in range(np.size(arr, 0)):
-            print(f"{arr[i][j]:.2f}|", end="")
-        print("")
 """
 
 if __name__ == "__main__":
+
+    # Example graph construction for testing
     graph = nx.Graph()
     edges = [
             # Core block around s=1 and t=14
