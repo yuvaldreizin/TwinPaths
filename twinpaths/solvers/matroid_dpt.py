@@ -1,4 +1,5 @@
 import math
+import time
 from collections import deque, defaultdict
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
@@ -483,6 +484,9 @@ def solve_dpt_matroid(
 
     Returns (edge_set, info).
     """
+    t_start = time.perf_counter()
+    ok: Optional[bool] = None
+
     if check_metric:
         ok, violations = is_triangle_inequality_satisfied(G, weight=weight, tol=metric_tol)
         if not ok:
@@ -519,7 +523,7 @@ def solve_dpt_matroid(
         )
 
     if visualize_final:
-        from utils.visualize import visualize_graph  # lazy import
+        from twinpaths.viz.visualize import visualize_graph  # lazy import
         import matplotlib.pyplot as plt
 
         visualize_graph(
@@ -531,11 +535,16 @@ def solve_dpt_matroid(
         plt.show()
 
     info = {
+        "algo": "matroid_dpt",
+        "total_cost": sum(G_use[u][v].get(weight, 0) for u, v in solution_edges),
+        "runtime_sec": time.perf_counter() - t_start,
+        "edges": sorted(solution_edges, key=lambda e: (str(e[0]), str(e[1]))),
+        # algorithm-specific details
         "edge_count": len(solution_edges),
         "expected_edges": G_use.number_of_nodes(),
         "enforce_metric_closure": enforce_metric_closure,
         "metric_checked": check_metric,
-        "triangle_ok": ok if check_metric else None,
+        "triangle_ok": ok,
         "rank1": sum(I),
         "rank2": sum(I),
         "dual_paths": dual_paths,
