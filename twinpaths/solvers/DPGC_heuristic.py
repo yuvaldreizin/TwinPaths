@@ -1,8 +1,9 @@
+import time
 import networkx as nx
 import matplotlib.pyplot as plt
 from typing import Tuple, List, Set, Dict, Any, Optional
-from utils.visualize_pyvis import visualize_dpgc_pyvis
-from utils.visualize import visualize_graph
+from twinpaths.viz.visualize_pyvis import visualize_dpgc_pyvis
+from twinpaths.viz.visualize import visualize_graph
 
 
 def _canon_edge(a: Any, b: Any) -> Tuple[Any, Any]:
@@ -21,49 +22,94 @@ def _min_cost_k_edge_disjoint_paths(
     visualize_dual_paths: bool = False,
 ) -> List[List[Any]]:
     """
-    Find k edge-disjoint s-t paths of minimum total weight using min-cost flow.
+    Find k edge-disjoint s-t paths of minimum total weight using Suurballe's algorithm.
     Returns list of k paths (each path is a list of nodes).
+
+    Suurballe's algorithm (k=2):
+      1. Find shortest path P1 via Dijkstra.
+      2. Build residual graph: reverse P1 edges with negated cost, keep all others.
+      3. Find shortest path P2 in residual via Bellman-Ford (negative weights exist).
+      4. Cancel edges used in opposite directions; decompose into two s-t paths.
+
+    For k != 2, falls back to sequential Dijkstra (greedy, polynomial).
     """
-    # build directed flow network with unit capacities
-    D = nx.DiGraph()
+    if k != 2:
+        # Sequential Dijkstra fallback for k != 2
+        H = G.copy()
+        paths: List[List[Any]] = []
+        for _ in range(k):
+            try:
+                path = nx.dijkstra_path(H, s, t, weight=weight)
+            except (nx.NetworkXNoPath, nx.NodeNotFound):
+                raise RuntimeError(
+                    f"Could not find {k} edge-disjoint paths from {s} to {t}"
+                )
+            paths.append(path)
+            for a, b in zip(path[:-1], path[1:]):
+                H.remove_edge(a, b)
+        return paths
+
+    # ── Suurballe's algorithm for k=2 ─────────────────────────────────────────
+
+    # Step 1: shortest path P1
+    try:
+        p1 = nx.dijkstra_path(G, s, t, weight=weight)
+    except (nx.NetworkXNoPath, nx.NodeNotFound):
+        raise RuntimeError(f"No path from {s} to {t}")
+
+    p1_edges: Set[Tuple[Any, Any]] = set(zip(p1[:-1], p1[1:]))
+
+    # Step 2: build residual directed graph
+    #   - For edges on P1: add the reverse arc with negated cost, drop the forward arc.
+    #   - For all other undirected edges: add both directions with original cost.
+    R = nx.DiGraph()
     for u, v, data in G.edges(data=True):
         w = data.get(weight, 1)
-        # add both directions with capacity 1 and cost = weight
-        D.add_edge(u, v, capacity=1, weight=w)
-        D.add_edge(v, u, capacity=1, weight=w)
+        if (u, v) in p1_edges:
+            # P1 used this direction → add reverse with negative cost
+            R.add_edge(v, u, weight=-w)
+        elif (v, u) in p1_edges:
+            # P1 used the opposite direction → add forward with negative cost
+            R.add_edge(u, v, weight=-w)
+        else:
+            # Not on P1 → both directions with original cost
+            R.add_edge(u, v, weight=w)
+            R.add_edge(v, u, weight=w)
 
-    # set node demands: send k units from s to t
-    demand = {n: 0 for n in D.nodes()}
-    demand[s] = -k   # supply at s
-    demand[t] = k    # demand at t
-    nx.set_node_attributes(D, demand, "demand")
-
-    # network_simplex to get min-cost flow
+    # Step 3: shortest path P2 in residual (Bellman-Ford handles negative weights)
     try:
-        cost, flow_dict = nx.network_simplex(D)
-    except Exception as e:
-        raise RuntimeError(f"min-cost flow failed: {e}")
+        p2 = nx.bellman_ford_path(R, s, t, weight=weight)
+    except (nx.NetworkXNoPath, nx.NodeNotFound, nx.NetworkXUnbounded):
+        raise RuntimeError(f"Could not find 2 edge-disjoint paths from {s} to {t}")
 
-    # build multigraph of used directed flow edges (flow > 0)
-    flow_multigraph = nx.DiGraph()
-    for u in flow_dict:
-        for v, f in flow_dict[u].items():
-            if f and f > 0:
-                flow_multigraph.add_edge(u, v, flow=int(f))
+    p2_edges: Set[Tuple[Any, Any]] = set(zip(p2[:-1], p2[1:]))
 
-    # decompose flows into paths s->t
-    paths: List[List[Any]] = []
+    # Step 4: cancel opposing edges and decompose into two s-t paths
+    canceled: Set[Tuple[Any, Any]] = set()
+    for a, b in p2_edges:
+        if (b, a) in p1_edges:
+            canceled.add((b, a))
+            canceled.add((a, b))
+
+    combined = (p1_edges | p2_edges) - canceled
+
+    # Decompose combined edge set into exactly 2 s-t paths
+    H = nx.DiGraph()
+    H.add_edges_from(combined)
+    paths = []
     for _ in range(k):
         try:
-            path = nx.shortest_path(flow_multigraph, s, t)
+            path = nx.shortest_path(H, s, t)
         except nx.NetworkXNoPath:
-            raise RuntimeError("Could not decompose flow into required number of paths")
+            break
         paths.append(path)
-        # decrement flow along used edges and remove edges if flow becomes zero
         for a, b in zip(path[:-1], path[1:]):
-            flow_multigraph[a][b]["flow"] -= 1
-            if flow_multigraph[a][b]["flow"] <= 0:
-                flow_multigraph.remove_edge(a, b)
+            H.remove_edge(a, b)
+
+    if len(paths) < k:
+        raise RuntimeError(
+            f"Suurballe decomposition produced only {len(paths)} paths (expected {k})"
+        )
 
     # Optional visualization of the dual paths
     if visualize_dual_paths:
@@ -187,6 +233,8 @@ def dpgc_heuristic(
       - final_edges: set of undirected edges (u,v) of the solution (u,v are original nodes, no 'C')
       - info: dict with intermediate data (paths, E1, N1, contracted_graph, metric_closure, mst_edges_in_closure, recovered_edges)
     """
+    t_start = time.perf_counter()
+
     # Step 1: two edge-disjoint min-cost s-t paths
     paths = _min_cost_k_edge_disjoint_paths(
         G,
@@ -248,6 +296,11 @@ def dpgc_heuristic(
 
     # Build info dict
     info: Dict[str, Any] = {
+        "algo": "dpgc_heuristic",
+        "total_cost": sum(G[u][v].get(weight, 0) for u, v in final_edges),
+        "runtime_sec": time.perf_counter() - t_start,
+        "edges": sorted(final_edges, key=lambda e: (str(e[0]), str(e[1]))),
+        # algorithm-specific details
         "paths": paths,
         "E1": sorted(E1, key=lambda e: (str(e[0]), str(e[1]))),
         "N1": sorted(N1, key=str),
