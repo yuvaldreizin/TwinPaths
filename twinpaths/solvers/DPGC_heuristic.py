@@ -51,35 +51,46 @@ def _min_cost_k_edge_disjoint_paths(
 
     # ── Suurballe's algorithm for k=2 ─────────────────────────────────────────
 
-    # Step 1: shortest path P1
+    # Step 1: shortest path P1 (Dijkstra). Keep the s-distances as node
+    # potentials so step 3 can run Dijkstra instead of Bellman-Ford.
     try:
-        p1 = nx.dijkstra_path(G, s, t, weight=weight)
-    except (nx.NetworkXNoPath, nx.NodeNotFound):
+        dist, paths_from_s = nx.single_source_dijkstra(G, s, weight=weight)
+        p1 = paths_from_s[t]
+    except (nx.NetworkXNoPath, nx.NodeNotFound, KeyError):
         raise RuntimeError(f"No path from {s} to {t}")
 
     p1_edges: Set[Tuple[Any, Any]] = set(zip(p1[:-1], p1[1:]))
 
-    # Step 2: build residual directed graph
+    # Step 2: build residual directed graph.
     #   - For edges on P1: add the reverse arc with negated cost, drop the forward arc.
     #   - For all other undirected edges: add both directions with original cost.
+    # Each arc also carries a *reduced cost* rweight = cost + dist[a] - dist[b]
+    # (Johnson reweighting). By the shortest-path property every rweight is >= 0
+    # (reverse P1 arcs get exactly 0), so step 3 can use Dijkstra in O(E log V).
     R = nx.DiGraph()
+
+    def _add_arc(a: Any, b: Any, cost: float) -> None:
+        rc = cost + dist[a] - dist[b]
+        if rc < 0.0:  # guard tiny float negatives from breaking Dijkstra
+            rc = 0.0
+        R.add_edge(a, b, weight=cost, rweight=rc)
+
     for u, v, data in G.edges(data=True):
         w = data.get(weight, 1)
         if (u, v) in p1_edges:
-            # P1 used this direction → add reverse with negative cost
-            R.add_edge(v, u, weight=-w)
+            _add_arc(v, u, -w)  # P1 used u->v → reverse arc v->u, negated cost
         elif (v, u) in p1_edges:
-            # P1 used the opposite direction → add forward with negative cost
-            R.add_edge(u, v, weight=-w)
+            _add_arc(u, v, -w)  # P1 used v->u → reverse arc u->v, negated cost
         else:
-            # Not on P1 → both directions with original cost
-            R.add_edge(u, v, weight=w)
-            R.add_edge(v, u, weight=w)
+            _add_arc(u, v, w)  # not on P1 → both directions, original cost
+            _add_arc(v, u, w)
 
-    # Step 3: shortest path P2 in residual (Bellman-Ford handles negative weights)
+    # Step 3: shortest path P2 in the residual via Dijkstra on the reduced costs.
+    # Reduced costs preserve shortest paths (the potential terms telescope), so
+    # this returns the same P2 as Bellman-Ford would, in O(E log V).
     try:
-        p2 = nx.bellman_ford_path(R, s, t, weight=weight)
-    except (nx.NetworkXNoPath, nx.NodeNotFound, nx.NetworkXUnbounded):
+        p2 = nx.dijkstra_path(R, s, t, weight="rweight")
+    except (nx.NetworkXNoPath, nx.NodeNotFound):
         raise RuntimeError(f"Could not find 2 edge-disjoint paths from {s} to {t}")
 
     p2_edges: Set[Tuple[Any, Any]] = set(zip(p2[:-1], p2[1:]))
@@ -191,27 +202,6 @@ def _contract_subgraph(
     return H
 
 
-def _metric_closure_graph(H: nx.Graph, weight: str = "weight") -> nx.Graph:
-    """
-    Create the metric-closure (complete graph) of H where edge weights are shortest-path distances in H.
-    Stores the shortest path in '_spath' for each edge of the closure.
-    """
-    Gm = nx.Graph()
-    nodes = list(H.nodes())
-    # compute all pairs shortest path lengths and paths
-    lengths = dict(nx.all_pairs_dijkstra_path_length(H, weight=weight))
-    paths = dict(nx.all_pairs_dijkstra_path(H, weight=weight))
-
-    for i, u in enumerate(nodes):
-        Gm.add_node(u)
-        for v in nodes[i + 1 :]:
-            d = lengths[u].get(v, float("inf"))
-            if d < float("inf"):
-                Gm.add_edge(u, v, weight=d, _spath=paths[u][v])
-
-    return Gm
-
-
 def dpgc_heuristic(
     G: nx.Graph,
     s: Any = 1,
@@ -225,13 +215,13 @@ def dpgc_heuristic(
 
     Steps:
       1) Find a minimum-cost pair of edge-disjoint s-t paths -> (E1, N1).
-      2) Contract subgraph induced by N1 into a node 'C', compute metric closure,
-         find MST of closure, recover original edges for MST edges and add those edges
-         once to E1.
+      2) Contract subgraph induced by N1 into a node 'C', find an MST of the
+         contracted graph directly, recover original edges for the MST edges and
+         add those edges once to E1.
 
     Returns:
       - final_edges: set of undirected edges (u,v) of the solution (u,v are original nodes, no 'C')
-      - info: dict with intermediate data (paths, E1, N1, contracted_graph, metric_closure, mst_edges_in_closure, recovered_edges)
+      - info: dict with intermediate data (paths, E1, N1, contracted_graph, mst_edges, recovered_edges)
     """
     t_start = time.perf_counter()
 
@@ -258,32 +248,23 @@ def dpgc_heuristic(
     contracted_label = "C"
     H = _contract_subgraph(G, N1, contracted_label=contracted_label, weight=weight)
 
-    # Metric closure (complete graph with shortest-path distances)
-    Gstar = _metric_closure_graph(H, weight=weight)
-
-    # MST on metric closure
-    mst = nx.minimum_spanning_tree(Gstar, weight="weight")
+    # MST directly on the contracted graph (no metric closure).
+    # H is sparse (O(V) nodes, O(E) edges), so Kruskal is O(E log V).
+    mst = nx.minimum_spanning_tree(H, weight=weight)
     mst_edges = list(mst.edges(data=True))
 
-    # Recover original edges corresponding to MST edges using '_spath' and '_orig_edge'
+    # Recover original edges for each MST edge. Each MST edge is an edge of H:
+    # either a contracted 'C'-v edge (map back via '_orig_edge') or a real edge
+    # between two off-path nodes (use as-is). 'C' never leaks into the output.
     recovered_edges: Set[Tuple[Any, Any]] = set()
     for u, v, data in mst_edges:
-        sp = data.get("_spath")
-        if sp is None:
-            sp = Gstar[u][v].get("_spath") or nx.shortest_path(H, u, v, weight=weight)
-
-        # Each (a, b) is an edge in H, which may be a contracted edge or a real edge.
-        for a, b in zip(sp[:-1], sp[1:]):
-            e_data = H[a][b]
-            orig = e_data.get("_orig_edge")
-            if orig is not None:
-                # contracted edge C - v, map back to original edge (u_orig, v)
-                u_orig, v_orig = orig
-                edge = _canon_edge(u_orig, v_orig)
-            else:
-                # normal edge between two nodes outside N1; already original
-                edge = _canon_edge(a, b)
-            recovered_edges.add(edge)
+        orig = data.get("_orig_edge")
+        if orig is not None:
+            u_orig, v_orig = orig
+            edge = _canon_edge(u_orig, v_orig)
+        else:
+            edge = _canon_edge(u, v)
+        recovered_edges.add(edge)
 
     # final solution edges = E1 U recovered_edges (all on original nodes)
     final_edges: Set[Tuple[Any, Any]] = set(E1) | recovered_edges
@@ -305,8 +286,8 @@ def dpgc_heuristic(
         "E1": sorted(E1, key=lambda e: (str(e[0]), str(e[1]))),
         "N1": sorted(N1, key=str),
         "contracted_graph": H,
-        "metric_closure": Gstar,
-        "mst_edges": [(u, v, d["weight"]) for u, v, d in mst_edges],
+        "metric_closure": None,  # no longer computed (MST runs on H directly)
+        "mst_edges": [(u, v, d.get(weight, 0)) for u, v, d in mst_edges],
         "recovered_edges": sorted(recovered_edges, key=lambda e: (str(e[0]), str(e[1]))),
     }
     return final_edges, info

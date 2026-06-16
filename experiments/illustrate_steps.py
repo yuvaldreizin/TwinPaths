@@ -185,8 +185,8 @@ def make_dpgc_figure(G, pos, results_dir):
     cy = sum(pos[n][1] for n in N1) / len(N1)
     posH['C'] = (cx, cy)
 
-    # metric closure + MST (on the contracted node set)
-    Gstar = info['metric_closure']
+    # MST on the contracted graph (no metric closure)
+    H_mst = info['contracted_graph']
     mst_edges = [(u, v) for u, v, _ in info['mst_edges']]
 
     def p0(ax):
@@ -203,7 +203,7 @@ def make_dpgc_figure(G, pos, results_dir):
                   node_colors={'C': VIOLET}, show_weights=True)
 
     def p3(ax):
-        draw_base(ax, Gstar, posH, "4. Metric closure → MST",
+        draw_base(ax, H_mst, posH, "4. MST on contracted graph",
                   node_colors={'C': VIOLET}, show_weights=False,
                   highlight={GREEN: (mst_edges, 4.5)})
 
