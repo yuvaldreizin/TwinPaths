@@ -77,7 +77,12 @@ def main():
     ap.add_argument("--brute-max", type=int, default=10,
                     help="validate Matroid against brute-force for n <= this")
     ap.add_argument("--edge-prob", type=float, default=0.5,
-                    help="edge probability for the random Euclidean graphs")
+                    help="edge probability for the random Euclidean graphs (dense)")
+    ap.add_argument("--avg-degree", type=float, default=None,
+                    help="if set, use SPARSE graphs with edge_prob = avg_degree/(n-1) "
+                         "per size (overrides --edge-prob)")
+    ap.add_argument("--out-prefix", default="",
+                    help="prefix for output filenames, e.g. 'dense_' or 'sparse_'")
     ap.add_argument("--tol", type=float, default=1e-6,
                     help="relative tolerance for counting a DPGC result as optimal")
     ap.add_argument("--quick", action="store_true",
@@ -92,13 +97,20 @@ def main():
 
     os.makedirs(args.results_dir, exist_ok=True)
 
+    def edge_prob_for(n):
+        if args.avg_degree is not None:
+            return min(1.0, args.avg_degree / max(n - 1, 1))
+        return args.edge_prob
+
+    regime = "sparse" if args.avg_degree is not None else "dense"
+
     raw_rows = []
     per_n_ratios = {}        # n -> list of approximation ratios
     per_n_match = {}         # n -> match rate (%)
     per_n_matroid_ok = {}    # n -> matroid-vs-brute match rate (%) or None
 
     print("=" * 64)
-    print(f"Accuracy benchmark  |  seeds={args.seeds}  edge_prob={args.edge_prob}")
+    print(f"Accuracy benchmark  |  seeds={args.seeds}  regime={regime}")
     print("DPGC vs Matroid (exact reference)")
     print("=" * 64)
 
@@ -107,7 +119,7 @@ def main():
         ratios, matched = [], 0
         matroid_checks, matroid_ok = 0, 0
         for seed in range(args.seeds):
-            G = random_euclidean_graph(n, edge_prob=args.edge_prob, seed=seed)
+            G = random_euclidean_graph(n, edge_prob=edge_prob_for(n), seed=seed)
             t_node = max(G.nodes())
 
             cd = cost_of(dpgc_heuristic, G, 1, t_node)
@@ -149,7 +161,7 @@ def main():
               f"p95 {np.percentile(r, 95):.4f}   max {r.max():.4f}")
 
     # ── raw CSV ─────────────────────────────────────────────────────────────────
-    raw_path = os.path.join(args.results_dir, "accuracy_raw.csv")
+    raw_path = os.path.join(args.results_dir, f"{args.out_prefix}accuracy_raw.csv")
     with open(raw_path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=["n", "seed", "dpgc_cost", "matroid_cost",
                                           "brute_cost", "ratio", "excess_pct",
@@ -160,7 +172,7 @@ def main():
 
     # ── summary CSV + console table ─────────────────────────────────────────────
     sizes = sorted(per_n_ratios)
-    summary_path = os.path.join(args.results_dir, "accuracy_summary.csv")
+    summary_path = os.path.join(args.results_dir, f"{args.out_prefix}accuracy_summary.csv")
     summary_rows = []
     print("\n" + "-" * 88)
     print(f"{'n':>4}{'samples':>9}{'match %':>10}{'mean ratio':>13}"
@@ -208,16 +220,15 @@ def main():
                 label="100% (always optimal)")
     ax1.set_xlabel("Number of nodes  (n)", fontsize=13, labelpad=8)
     ax1.set_ylabel("Graphs where DPGC = optimal  (%)", fontsize=13, labelpad=8)
-    ax1.set_title(f"DPGC match rate vs. Matroid DPT (exact reference)  —  "
-                  f"{args.seeds} random Euclidean graphs per size",
-                  fontsize=13, pad=12, color=TEXT)
+    ax1.set_title(f"DPGC match rate vs. Matroid DPT  —  {regime}",
+                  fontsize=14, pad=12, color=TEXT)
     ax1.set_ylim(0, 119)
     ax1.set_xticks(sizes)
     ax1.legend(fontsize=10, loc="upper right")
     ax1.grid(True, axis="y", zorder=0)
 
     fig.tight_layout()
-    plot_path = os.path.join(args.results_dir, "accuracy_comparison.png")
+    plot_path = os.path.join(args.results_dir, f"{args.out_prefix}accuracy_comparison.png")
     fig.savefig(plot_path, dpi=150, facecolor=BG)
     print(f"Saved plot -> {plot_path}")
 

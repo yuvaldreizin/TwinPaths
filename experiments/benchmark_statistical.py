@@ -225,9 +225,9 @@ def main():
         lambda v, _: f"{v:.3f}s" if v >= 1e-3 else f"{v:.0e}s"))
     ax.set_xlabel("Number of nodes  (n)", fontsize=13, labelpad=8)
     ax.set_ylabel("Mean runtime  [log scale, 95% CI]", fontsize=13, labelpad=8)
-    ax.set_title(f"DPT/DPST solver runtime  —  mean of {args.seeds} random "
-                 f"Euclidean graphs per size ({density_desc})",
-                 fontsize=13, pad=14, color=TEXT)
+    regime = "sparse" if args.avg_degree is not None else "dense"
+    ax.set_title(f"DPT/DPST solver runtime  —  {regime}",
+                 fontsize=14, pad=14, color=TEXT)
     ax.set_xticks(args.sizes)
     ax.legend(fontsize=11, loc="upper left")
     ax.grid(True, which="both")
